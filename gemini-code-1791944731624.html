@@ -1,0 +1,529 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>River Basin Dynamics - Interactive Game & 3D Hydro Model</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+    body { background-color: #0f172a; color: #f8fafc; overflow-x: hidden; }
+    
+    header { background: #1e293b; padding: 1rem; border-bottom: 2px solid #38bdf8; text-align: center; }
+    h1 { font-size: 1.6rem; color: #38bdf8; margin-bottom: 0.2rem; }
+    p.subtitle { color: #94a3b8; font-size: 0.9rem; }
+
+    nav { display: flex; justify-content: center; gap: 1rem; margin: 0.8rem 0; }
+    .tab-btn { background: #334155; color: white; border: none; padding: 0.6rem 1.2rem; font-weight: bold; border-radius: 8px; cursor: pointer; transition: 0.2s; }
+    .tab-btn.active { background: #0284c7; box-shadow: 0 0 10px rgba(56, 189, 248, 0.5); }
+
+    .container { max-width: 1400px; margin: 0 auto; padding: 1rem; }
+    .view-section { display: none; }
+    .view-section.active { display: block; }
+
+    /* GAME STYLES */
+    .game-card { background: #1e293b; padding: 1.5rem; border-radius: 12px; border: 1px solid #334155; }
+    .factor-selector { display: flex; gap: 0.5rem; margin-bottom: 1.2rem; flex-wrap: wrap; }
+    .factor-btn { background: #334155; color: white; border: none; padding: 0.5rem 1rem; border-radius: 6px; cursor: pointer; }
+    .factor-btn.selected { background: #0ea5e9; font-weight: bold; }
+
+    .drop-zone-container { display: flex; flex-direction: column; gap: 10px; margin: 1.2rem 0; }
+    .drop-slot { background: #0f172a; border: 2px dashed #475569; padding: 0.8rem; border-radius: 8px; min-height: 52px; display: flex; align-items: center; justify-content: space-between; }
+    .drop-slot.correct { border-color: #22c55e; background: rgba(34, 197, 94, 0.1); }
+    .drop-slot.incorrect { border-color: #ef4444; background: rgba(239, 68, 68, 0.1); }
+
+    .card-pool { display: flex; gap: 10px; flex-wrap: wrap; background: #0f172a; padding: 1rem; border-radius: 8px; min-height: 60px; margin-top: 0.5rem; }
+    .draggable-item { background: #0284c7; color: white; padding: 0.6rem 1rem; border-radius: 6px; cursor: grab; font-size: 0.9rem; font-weight: 500; user-select: none; }
+    .draggable-item:active { cursor: grabbing; }
+
+    /* 3D MODEL LAYOUT */
+    .model-layout { display: grid; grid-template-columns: 340px 1fr 300px; gap: 1rem; height: calc(100vh - 170px); min-height: 580px; }
+    .controls-panel, .analytics-panel { background: #1e293b; padding: 1.2rem; border-radius: 12px; border: 1px solid #334155; overflow-y: auto; z-index: 10; }
+    
+    #canvas-container { position: relative; background: #090d16; border-radius: 12px; overflow: hidden; border: 1px solid #334155; width: 100%; height: 100%; }
+    #canvas-container canvas { width: 100% !important; height: 100% !important; display: block; }
+
+    .control-group { margin-bottom: 1.2rem; }
+    .control-group label { display: block; font-size: 0.85rem; font-weight: 600; color: #cbd5e1; margin-bottom: 0.3rem; }
+    .control-group input[type="range"] { width: 100%; accent-color: #38bdf8; cursor: pointer; height: 6px; }
+    .val-display { float: right; color: #38bdf8; font-weight: bold; }
+
+    /* ENERGY GAUGE METER */
+    .energy-gauge-box { background: #0f172a; padding: 1.2rem; border-radius: 8px; margin-bottom: 1rem; border: 1px solid #38bdf8; }
+    .energy-bar-bg { background: #1e293b; height: 20px; border-radius: 10px; overflow: hidden; margin-top: 0.5rem; position: relative; }
+    .energy-bar-fill { height: 100%; width: 50%; background: linear-gradient(90deg, #22c55e, #f59e0b, #ef4444); transition: width 0.3s ease-out; }
+
+    .metric-box { background: #0f172a; padding: 0.8rem 1rem; border-radius: 8px; margin-bottom: 0.8rem; border-left: 4px solid #38bdf8; }
+    .metric-title { font-size: 0.75rem; color: #94a3b8; text-transform: uppercase; }
+    .metric-value { font-size: 1.2rem; font-weight: bold; color: #f8fafc; margin-top: 0.2rem; }
+    
+    .btn { background: #0284c7; color: white; border: none; padding: 0.6rem 1.2rem; border-radius: 6px; cursor: pointer; font-weight: bold; transition: 0.2s; }
+    .btn:hover { background: #0369a1; }
+
+    @media (max-width: 1024px) {
+      .model-layout { grid-template-columns: 1fr; height: auto; }
+      #canvas-container { height: 400px; }
+    }
+  </style>
+</head>
+<body>
+
+  <header>
+    <h1>Drainage Basin Dynamics Interactive</h1>
+    <p class="subtitle">F.5 Geography - Process Sequencing & 3D River Energy Simulator</p>
+    <nav>
+      <button class="tab-btn active" onclick="switchTab('game')">🎮 Sequence Matching Game</button>
+      <button class="tab-btn" onclick="switchTab('model')">🧊 3D River Basin & Energy Simulator</button>
+    </nav>
+  </header>
+
+  <div class="container">
+    <!-- SECTION 1: SEQUENCE GAME -->
+    <div id="game-view" class="view-section active">
+      <div class="game-card">
+        <h2>Process Sequence Challenge</h2>
+        <p style="color: #94a3b8; margin: 0.5rem 0 1rem 0;">Select a drainage basin factor. Drag each step into its correct sequential cause-and-effect order.</p>
+
+        <div class="factor-selector">
+          <button class="factor-btn selected" onclick="loadGameFactor(0)">1. Basin Size</button>
+          <button class="factor-btn" onclick="loadGameFactor(1)">2. Valley Slope</button>
+          <button class="factor-btn" onclick="loadGameFactor(2)">3. Soil Permeability</button>
+          <button class="factor-btn" onclick="loadGameFactor(3)">4. Vegetation Cover</button>
+        </div>
+
+        <h3 id="factor-title" style="color: #38bdf8;">Factor: Larger size of drainage basin</h3>
+        <p id="relationship-type" style="font-weight: bold; color: #f59e0b; margin-top: 0.3rem;">Relationship: Positive</p>
+
+        <div class="drop-zone-container" id="drop-zone-container"></div>
+
+        <h4 style="margin-top: 1rem; color: #cbd5e1;">Available Process Cards:</h4>
+        <div class="card-pool" id="card-pool" ondragover="allowDrop(event)" ondrop="dropToPool(event)"></div>
+
+        <div style="margin-top: 1.5rem; display: flex; gap: 1rem;">
+          <button class="btn" onclick="checkAnswers()">Check Sequence</button>
+          <button class="btn" style="background: #475569;" onclick="resetCurrentGame()">Reset</button>
+        </div>
+        <div id="game-feedback" style="margin-top: 1rem; font-weight: bold;"></div>
+      </div>
+    </div>
+
+    <!-- SECTION 2: 3D SUBSURFACE & RIVER ENERGY SIMULATOR -->
+    <div id="model-view" class="view-section">
+      <div class="model-layout">
+        
+        <!-- Controls Panel -->
+        <div class="controls-panel">
+          <h3 style="color: #38bdf8; margin-bottom: 1rem;">Basin Input Variables</h3>
+          
+          <div class="control-group">
+            <label>1. Catchment Size <span class="val-display" id="val-size">Medium</span></label>
+            <input type="range" id="param-size" min="1" max="3" value="2" oninput="updateModel()">
+          </div>
+
+          <div class="control-group">
+            <label>2. Steepness of Slope <span class="val-display" id="val-slope">Moderate</span></label>
+            <input type="range" id="param-slope" min="1" max="3" value="2" oninput="updateModel()">
+          </div>
+
+          <div class="control-group">
+            <label>3. Permeability of Soil <span class="val-display" id="val-perm">Moderate</span></label>
+            <input type="range" id="param-perm" min="1" max="3" value="2" oninput="updateModel()">
+          </div>
+
+          <div class="control-group">
+            <label>4. Vegetation Cover <span class="val-display" id="val-veg">Moderate</span></label>
+            <input type="range" id="param-veg" min="1" max="3" value="2" oninput="updateModel()">
+          </div>
+
+          <hr style="border-color: #334155; margin: 1rem 0;">
+
+          <p style="font-size: 0.8rem; color: #94a3b8; line-height: 1.4;">
+            <b>Observation Guide:</b><br>
+            • Increase <b>Basin Size / Slope</b> $\rightarrow$ Increases Overland Runoff $\rightarrow$ Higher River Energy[cite: 1, 2].<br>
+            • Increase <b>Permeability / Vegetation</b> $\rightarrow$ Increases Infiltration $\rightarrow$ Lower River Energy[cite: 3, 4].
+          </p>
+        </div>
+
+        <!-- 3D Canvas -->
+        <div id="canvas-container"></div>
+
+        <!-- Analytics Panel -->
+        <div class="analytics-panel">
+          <h3 style="color: #38bdf8; margin-bottom: 1rem;">River Energy Output</h3>
+          
+          <!-- Kinetic Energy Meter -->
+          <div class="energy-gauge-box">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <span style="font-size: 0.85rem; font-weight: bold; color: #cbd5e1;">RIVER KINETIC ENERGY</span>
+              <span id="metric-energy-val" style="font-weight: bold; color: #ef4444;">Moderate</span>
+            </div>
+            <div class="energy-bar-bg">
+              <div class="energy-bar-fill" id="energy-bar"></div>
+            </div>
+          </div>
+
+          <div class="metric-box" style="border-color: #3b82f6;">
+            <div class="metric-title">Channel Water Volume</div>
+            <div class="metric-value" id="metric-water">Moderate</div>
+          </div>
+
+          <div class="metric-box" style="border-color: #f59e0b;">
+            <div class="metric-title">Overland Flow Rate</div>
+            <div class="metric-value" id="metric-runoff">Moderate</div>
+          </div>
+
+          <div class="metric-box" style="border-color: #22d3ee;">
+            <div class="metric-title">Infiltration Rate</div>
+            <div class="metric-value" id="metric-infil">Moderate</div>
+          </div>
+
+          <div class="metric-box" style="border-color: #10b981;">
+            <div class="metric-title">Interception by Plants</div>
+            <div class="metric-value" id="metric-interception">Moderate</div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // --- GAME DATA & LOGIC ---
+    const factorData = [
+      {
+        title: "1. Size of Drainage Basin (Catchment Area)",
+        relationship: "Positive Relationship with Channel Water",
+        sequence: [
+          "Larger size of drainage basin",
+          "Collects more water",
+          "Larger amount of channel water",
+          "More river energy"
+        ]
+      },
+      {
+        title: "2. Steepness of Valley Slope (Gradient)",
+        relationship: "Positive Relationship with Channel Water",
+        sequence: [
+          "Steep valley slope",
+          "Less infiltration",
+          "More overland flow",
+          "Larger amount of channel water",
+          "More river energy"
+        ]
+      },
+      {
+        title: "3. Permeability of Soils and Rocks",
+        relationship: "Negative Relationship with Channel Water",
+        sequence: [
+          "High permeability",
+          "More infiltration",
+          "Less overland flow",
+          "Smaller amount of channel water",
+          "Less river energy"
+        ]
+      },
+      {
+        title: "4. Vegetation Cover",
+        relationship: "Negative Relationship with Channel Water",
+        sequence: [
+          "Dense vegetation cover",
+          "More interception and infiltration",
+          "Less overland flow",
+          "Smaller amount of channel water",
+          "Less river energy"
+        ]
+      }
+    ];
+
+    let currentFactorIndex = 0;
+
+    function switchTab(tab) {
+      document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+      document.querySelectorAll('.view-section').forEach(sec => sec.classList.remove('active'));
+      if (tab === 'game') {
+        document.querySelectorAll('.tab-btn')[0].classList.add('active');
+        document.getElementById('game-view').classList.add('active');
+      } else {
+        document.querySelectorAll('.tab-btn')[1].classList.add('active');
+        document.getElementById('model-view').classList.add('active');
+        if (!sceneInitialized) {
+          setTimeout(init3DScene, 100);
+        }
+      }
+    }
+
+    function loadGameFactor(idx) {
+      currentFactorIndex = idx;
+      document.querySelectorAll('.factor-btn').forEach((btn, i) => {
+        btn.classList.toggle('selected', i === idx);
+      });
+
+      const data = factorData[idx];
+      document.getElementById('factor-title').innerText = "Factor: " + data.title;
+      document.getElementById('relationship-type').innerText = "Relationship: " + data.relationship;
+      document.getElementById('game-feedback').innerText = "";
+
+      const dropContainer = document.getElementById('drop-zone-container');
+      const pool = document.getElementById('card-pool');
+      dropContainer.innerHTML = '';
+      pool.innerHTML = '';
+
+      data.sequence.forEach((_, i) => {
+        const slot = document.createElement('div');
+        slot.className = 'drop-slot';
+        slot.dataset.step = i;
+        slot.innerHTML = `<span style="color: #64748b; font-weight: bold;">Step ${i + 1}</span>`;
+        slot.ondragover = allowDrop;
+        slot.ondrop = dropToSlot;
+        dropContainer.appendChild(slot);
+      });
+
+      let shuffled = [...data.sequence].sort(() => Math.random() - 0.5);
+      shuffled.forEach((text, i) => {
+        const card = document.createElement('div');
+        card.className = 'draggable-item';
+        card.draggable = true;
+        card.id = `card-${i}`;
+        card.innerText = text;
+        card.ondragstart = dragStart;
+        pool.appendChild(card);
+      });
+    }
+
+    function resetCurrentGame() { loadGameFactor(currentFactorIndex); }
+    function dragStart(ev) { ev.dataTransfer.setData("text", ev.target.id); }
+    function allowDrop(ev) { ev.preventDefault(); }
+    function dropToSlot(ev) {
+      ev.preventDefault();
+      const card = document.getElementById(ev.dataTransfer.getData("text"));
+      if (ev.currentTarget.classList.contains('drop-slot')) ev.currentTarget.appendChild(card);
+    }
+    function dropToPool(ev) {
+      ev.preventDefault();
+      document.getElementById('card-pool').appendChild(document.getElementById(ev.dataTransfer.getData("text")));
+    }
+
+    function checkAnswers() {
+      const data = factorData[currentFactorIndex];
+      const slots = document.querySelectorAll('.drop-slot');
+      let allCorrect = true;
+
+      slots.forEach((slot, idx) => {
+        const card = slot.querySelector('.draggable-item');
+        slot.classList.remove('correct', 'incorrect');
+        if (card && card.innerText === data.sequence[idx]) {
+          slot.classList.add('correct');
+        } else {
+          slot.classList.add('incorrect');
+          allCorrect = false;
+        }
+      });
+
+      const feedback = document.getElementById('game-feedback');
+      feedback.style.color = allCorrect ? '#22c55e' : '#ef4444';
+      feedback.innerText = allCorrect ? '🎉 Correct sequence!' : '❌ Incorrect order. Rearrange and try again!';
+    }
+
+    // --- 3D THREE.JS ENGINE ---
+    let scene, camera, renderer, controls;
+    let sceneInitialized = false;
+
+    let terrainBlock, riverMesh, vegetationGroup;
+    let particlesRunoff, flowSpeed = 0.05;
+
+    function init3DScene() {
+      sceneInitialized = true;
+      const container = document.getElementById('canvas-container');
+      
+      scene = new THREE.Scene();
+      scene.background = new THREE.Color(0x090d16);
+
+      camera = new THREE.PerspectiveCamera(40, container.clientWidth / container.clientHeight, 0.1, 1000);
+      camera.position.set(16, 14, 22);
+
+      renderer = new THREE.WebGLRenderer({ antialias: true });
+      renderer.setSize(container.clientWidth, container.clientHeight);
+      container.appendChild(renderer.domElement);
+
+      controls = new THREE.OrbitControls(camera, renderer.domElement);
+      controls.enableDamping = true;
+
+      // Lights
+      const ambientLight = new THREE.AmbientLight(0xffffff, 0.75);
+      scene.add(ambientLight);
+
+      const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+      dirLight.position.set(10, 20, 15);
+      scene.add(dirLight);
+
+      // Groups
+      vegetationGroup = new THREE.Group();
+      scene.add(vegetationGroup);
+
+      // Particle System
+      createRunoffParticles();
+
+      // Initial Build
+      updateModel();
+
+      function animate() {
+        requestAnimationFrame(animate);
+        animateParticles();
+        controls.update();
+        renderer.render(scene, camera);
+      }
+      animate();
+
+      window.addEventListener('resize', onWindowResize);
+    }
+
+    function onWindowResize() {
+      const container = document.getElementById('canvas-container');
+      if (!container || !renderer) return;
+      camera.aspect = container.clientWidth / container.clientHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(container.clientWidth, container.clientHeight);
+    }
+
+    function updateModel() {
+      const sizeVal = parseInt(document.getElementById('param-size').value);
+      const slopeVal = parseInt(document.getElementById('param-slope').value);
+      const permVal = parseInt(document.getElementById('param-perm').value);
+      const vegVal = parseInt(document.getElementById('param-veg').value);
+
+      const labels = ['Low', 'Moderate', 'High'];
+      document.getElementById('val-size').innerText = labels[sizeVal - 1];
+      document.getElementById('val-slope').innerText = labels[slopeVal - 1];
+      document.getElementById('val-perm').innerText = labels[permVal - 1];
+      document.getElementById('val-veg').innerText = labels[vegVal - 1];
+
+      // Rebuild Terrain Cutaway Block
+      if (terrainBlock) scene.remove(terrainBlock);
+      if (riverMesh) scene.remove(riverMesh);
+
+      const width = 10 + sizeVal * 3;
+      const depth = 10;
+      const slopeHeight = slopeVal * 2.0;
+
+      const geo = new THREE.BoxGeometry(width, 5, depth, 24, 10, 10);
+      const pos = geo.attributes.position;
+
+      // Deform Block Top to V-Shape Valley
+      for (let i = 0; i < pos.count; i++) {
+        let x = pos.getX(i);
+        let y = pos.getY(i);
+        if (y > 0) {
+          let distFromCenter = Math.abs(x) / (width / 2);
+          pos.setY(i, y + Math.pow(distFromCenter, 1.5) * slopeHeight);
+        }
+      }
+      geo.computeVertexNormals();
+
+      const mat = new THREE.MeshStandardMaterial({ 
+        color: permVal === 3 ? 0x92400e : (permVal === 2 ? 0x475569 : 0x334155),
+        roughness: 0.8
+      });
+      terrainBlock = new THREE.Mesh(geo, mat);
+      scene.add(terrainBlock);
+
+      // Channel Water Volume Calculation
+      let waterVolumeScore = (sizeVal * 2.5) + (slopeVal * 2.0) - (permVal * 2.0) - (vegVal * 1.8);
+      let riverEnergyScore = waterVolumeScore + (slopeVal * 2.0); // Energy depends on Volume + Slope Gradient
+
+      // Dynamic River Channel Dimensions
+      const channelWidth = Math.max(0.6, 0.5 + (waterVolumeScore * 0.35));
+      const channelDepth = Math.max(0.2, 0.2 + (waterVolumeScore * 0.1));
+
+      const riverGeo = new THREE.BoxGeometry(channelWidth, channelDepth, depth);
+      const riverMat = new THREE.MeshStandardMaterial({ color: 0x0284c7, transparent: true, opacity: 0.85 });
+      riverMesh = new THREE.Mesh(riverGeo, riverMat);
+      riverMesh.position.y = 2.5 + (channelDepth / 2);
+      scene.add(riverMesh);
+
+      // Rebuild Trees (Interception)
+      while (vegetationGroup.children.length > 0) vegetationGroup.remove(vegetationGroup.children[0]);
+      const treeCount = vegVal * 12;
+      const treeGeo = new THREE.ConeGeometry(0.35, 1.1, 5);
+      const treeMat = new THREE.MeshStandardMaterial({ color: 0x16a34a });
+
+      for (let i = 0; i < treeCount; i++) {
+        const tree = new THREE.Mesh(treeGeo, treeMat);
+        let side = Math.random() > 0.5 ? 1 : -1;
+        let x = side * (1.2 + Math.random() * (width / 2 - 1.8));
+        let z = (Math.random() - 0.5) * (depth - 1.5);
+        let dist = Math.abs(x) / (width / 2);
+        let y = 2.5 + Math.pow(dist, 1.5) * slopeHeight + 0.55;
+
+        tree.position.set(x, y, z);
+        vegetationGroup.add(tree);
+      }
+
+      // Dynamic Particle Flow Speed based on River Energy
+      flowSpeed = Math.max(0.01, riverEnergyScore * 0.015);
+
+      // Update Analytics & Kinetic Energy Gauge
+      let infilScore = (permVal * 2.5) + (vegVal * 1.5) - (slopeVal * 1.5);
+      let runoffScore = (slopeVal * 2.5) - (permVal * 2.0) - (vegVal * 1.5);
+
+      updateMetrics('metric-infil', infilScore);
+      updateMetrics('metric-runoff', runoffScore);
+      updateMetrics('metric-water', waterVolumeScore);
+      updateMetrics('metric-interception', vegVal * 3);
+
+      // Update Energy Meter Bar
+      const energyPct = Math.min(100, Math.max(10, (riverEnergyScore / 12) * 100));
+      document.getElementById('energy-bar').style.width = energyPct + '%';
+      
+      const energyLabel = document.getElementById('metric-energy-val');
+      if (riverEnergyScore <= 2.5) { energyLabel.innerText = "Very Low"; energyLabel.style.color = "#22c55e"; }
+      else if (riverEnergyScore <= 5.5) { energyLabel.innerText = "Low"; energyLabel.style.color = "#84cc16"; }
+      else if (riverEnergyScore <= 8.5) { energyLabel.innerText = "Moderate"; energyLabel.style.color = "#f59e0b"; }
+      else { energyLabel.innerText = "Very High"; energyLabel.style.color = "#ef4444"; }
+    }
+
+    function updateMetrics(id, score) {
+      const el = document.getElementById(id);
+      if (score <= 1.5) el.innerText = "Very Low";
+      else if (score <= 3.5) el.innerText = "Low";
+      else if (score <= 6.5) el.innerText = "Moderate";
+      else el.innerText = "High";
+    }
+
+    function createRunoffParticles() {
+      const count = 100;
+      const geo = new THREE.BufferGeometry();
+      const pos = new Float32Array(count * 3);
+
+      for (let i = 0; i < count * 3; i += 3) {
+        pos[i] = (Math.random() - 0.5) * 10;
+        pos[i+1] = 3 + Math.random() * 3;
+        pos[i+2] = (Math.random() - 0.5) * 8;
+      }
+      geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+      particlesRunoff = new THREE.Points(geo, new THREE.PointsMaterial({ color: 0x38bdf8, size: 0.22 }));
+      scene.add(particlesRunoff);
+    }
+
+    function animateParticles() {
+      if (!particlesRunoff) return;
+      const pos = particlesRunoff.geometry.attributes.position.array;
+
+      for (let i = 0; i < pos.length; i += 3) {
+        // Move towards central river channel
+        if (pos[i] > 0.2) pos[i] -= flowSpeed;
+        else if (pos[i] < -0.2) pos[i] += flowSpeed;
+
+        pos[i+1] -= flowSpeed * 0.5;
+        if (pos[i+1] < 2.5) {
+          pos[i] = (Math.random() - 0.5) * 10;
+          pos[i+1] = 4 + Math.random() * 2;
+        }
+      }
+      particlesRunoff.geometry.attributes.position.needsUpdate = true;
+    }
+
+    window.onload = () => { loadGameFactor(0); };
+  </script>
+</body>
+</html>
